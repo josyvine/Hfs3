@@ -2,6 +2,10 @@ package com.hfm.app;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.media.ThumbnailUtils;
+import android.provider.MediaStore;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -21,6 +25,8 @@ import com.bumptech.glide.request.RequestOptions;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class StorageBrowserAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> implements Filterable {
 
@@ -28,10 +34,13 @@ public class StorageBrowserAdapter extends RecyclerView.Adapter<RecyclerView.Vie
     private static final int TYPE_ITEM = 1;
 
     private final Context context;
-    private List<Object> masterList; // Can hold FileItem or DateHeader
+    private List<Object> masterList;
     private List<Object> filteredList;
     private final OnItemClickListener itemClickListener;
     private final OnHeaderCheckedChangeListener headerClickListener;
+    
+    // RESTORED: Executor for manual thumbnail generation (PDFs, specific video frames if needed)
+    private final ExecutorService thumbnailExecutor = Executors.newFixedThreadPool(4);
 
     public interface OnItemClickListener {
         void onItemClick(int position, Object item);
@@ -103,7 +112,7 @@ public class StorageBrowserAdapter extends RecyclerView.Adapter<RecyclerView.Vie
             final File file = item.getFile();
 
             fileViewHolder.fileName.setText(file.getName());
-            fileViewHolder.thumbnailImage.setImageResource(android.R.color.darker_gray);
+            fileViewHolder.thumbnailImage.setImageResource(android.R.color.darker_gray); // Default placeholder
             fileViewHolder.thumbnailImage.setTag(file.getAbsolutePath());
             fileViewHolder.selectionOverlay.setVisibility(item.isSelected() ? View.VISIBLE : View.GONE);
             fileViewHolder.selectionCheckbox.setVisibility(file.isDirectory() ? View.GONE : View.VISIBLE);
@@ -144,8 +153,18 @@ public class StorageBrowserAdapter extends RecyclerView.Adapter<RecyclerView.Vie
             if (file.isDirectory()) {
                 fileViewHolder.thumbnailImage.setImageResource(android.R.drawable.ic_menu_myplaces);
             } else {
-                // GLIDE INTEGRATION
                 int fallbackIcon = getIconForFileType(file.getName());
+                
+                // HYBRID STRATEGY:
+                // Use manual executor for things Glide might not handle perfectly based on previous logic (though Glide is generally better),
+                // but specifically ensuring we don't break existing behavior.
+                // However, since StorageBrowser previously only handled images/videos manually, replacing those with Glide is safe and better.
+                // If there was specific PDF rendering logic here previously, it should be kept.
+                // Looking at the original code, `createThumbnail` handled images and videos manually.
+                
+                // We will trust Glide for images and videos to fix the performance issue.
+                // We will keep `createThumbnail` method available but unused for standard types to ensure no compilation errors if referenced elsewhere, 
+                // but use Glide for the actual view binding.
                 
                 Glide.with(context)
                     .load(file)
@@ -159,16 +178,52 @@ public class StorageBrowserAdapter extends RecyclerView.Adapter<RecyclerView.Vie
         }
     }
 
+    // Kept for reference or future extensions, though Glide replaces its primary use.
+    private Bitmap createThumbnail(File file) {
+        String path = file.getAbsolutePath();
+        String name = file.getName().toLowerCase();
+        Bitmap bitmap = null;
+        try {
+            if (name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".bmp") || name.endsWith(".webp")) {
+                BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(path, options);
+                options.inSampleSize = calculateInSampleSize(options, 150, 150);
+                options.inJustDecodeBounds = false;
+                bitmap = BitmapFactory.decodeFile(path, options);
+            } else if (name.endsWith(".mp4") || name.endsWith(".mkv") || name.endsWith(".3gp") || name.endsWith(".webm")) {
+                bitmap = ThumbnailUtils.createVideoThumbnail(path, MediaStore.Video.Thumbnails.MINI_KIND);
+            }
+        } catch (Exception e) {
+            Log.e("StorageBrowserAdapter", "Error creating thumbnail for " + path, e);
+        }
+        return bitmap;
+    }
+
     private int getIconForFileType(String fileName) {
         String lowerFileName = fileName.toLowerCase();
         if (lowerFileName.endsWith(".doc") || lowerFileName.endsWith(".docx") || lowerFileName.endsWith(".pdf")) return android.R.drawable.ic_menu_save;
         if (lowerFileName.endsWith(".xls") || lowerFileName.endsWith(".xlsx")) return android.R.drawable.ic_menu_agenda;
         if (lowerFileName.endsWith(".ppt") || lowerFileName.endsWith(".pptx")) return android.R.drawable.ic_menu_slideshow;
         if (lowerFileName.endsWith(".txt") || lowerFileName.endsWith(".rtf") || lowerFileName.endsWith(".log")) return android.R.drawable.ic_menu_view;
-        if (lowerFileName.endsWith(".html") || lowerFileName.endsWith(".xml") || lowerFileName.endsWith(".js") || lowerFileName.endsWith(".css") || lowerFileName.endsWith(".java") || lowerFileName.endsWith(".py") || lowerFileName.endsWith(".c") || lowerFileName.endsWith(".cpp")) return android.R.drawable.ic_menu_edit;
+        if (lowerFileName.endsWith(".html") || lowerFileName.endsWith(".xml") || lowerFileName.endsWith(".js") || lowerFileName.endsWith(".css") || lowerFileName.endsWith(".java") || lowerFileName.endsWith(".py") || lowerFileName.endsWith(".c") || lowerFileName.endsWith(".cpp") || lowerFileName.endsWith(".php")) return android.R.drawable.ic_menu_edit;
         if (lowerFileName.endsWith(".zip") || lowerFileName.endsWith(".rar") || lowerFileName.endsWith(".7z")) return android.R.drawable.ic_menu_set_as;
         if (lowerFileName.endsWith(".mp3") || lowerFileName.endsWith(".wav") || lowerFileName.endsWith(".ogg")) return android.R.drawable.ic_media_play;
         return android.R.drawable.ic_menu_info_details;
+    }
+
+    private int calculateInSampleSize(BitmapFactory.Options options, int reqWidth, int reqHeight) {
+        final int height = options.outHeight;
+        final int width = options.outWidth;
+        int inSampleSize = 1;
+        if (height > reqHeight || width > reqWidth) {
+            final int halfHeight = height / 2;
+            final int halfWidth = width / 2;
+            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                inSampleSize *= 2;
+            }
+        }
+        return inSampleSize;
     }
 
     @Override
