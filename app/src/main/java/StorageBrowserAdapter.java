@@ -2,10 +2,6 @@ package com.hfm.app;
 
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.media.ThumbnailUtils;
-import android.provider.MediaStore;
-import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -17,11 +13,14 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
+
+import com.bumptech.glide.Glide;
+import com.bumptech.glide.load.engine.DiskCacheStrategy;
+import com.bumptech.glide.request.RequestOptions;
+
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public class StorageBrowserAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> implements Filterable {
 
@@ -33,7 +32,6 @@ public class StorageBrowserAdapter extends RecyclerView.Adapter<RecyclerView.Vie
     private List<Object> filteredList;
     private final OnItemClickListener itemClickListener;
     private final OnHeaderCheckedChangeListener headerClickListener;
-    private final ExecutorService thumbnailExecutor = Executors.newFixedThreadPool(4);
 
     public interface OnItemClickListener {
         void onItemClick(int position, Object item);
@@ -146,47 +144,19 @@ public class StorageBrowserAdapter extends RecyclerView.Adapter<RecyclerView.Vie
             if (file.isDirectory()) {
                 fileViewHolder.thumbnailImage.setImageResource(android.R.drawable.ic_menu_myplaces);
             } else {
-                thumbnailExecutor.execute(new Runnable() {
-						@Override
-						public void run() {
-							final Bitmap thumbnail = createThumbnail(file);
-							if (fileViewHolder.thumbnailImage.getTag().equals(file.getAbsolutePath())) {
-								fileViewHolder.thumbnailImage.post(new Runnable() {
-										@Override
-										public void run() {
-											if (thumbnail != null) {
-												fileViewHolder.thumbnailImage.setImageBitmap(thumbnail);
-											} else {
-												fileViewHolder.thumbnailImage.setImageResource(getIconForFileType(file.getName()));
-											}
-										}
-									});
-							}
-						}
-					});
+                // GLIDE INTEGRATION
+                int fallbackIcon = getIconForFileType(file.getName());
+                
+                Glide.with(context)
+                    .load(file)
+                    .apply(new RequestOptions()
+                        .placeholder(fallbackIcon)
+                        .error(fallbackIcon)
+                        .diskCacheStrategy(DiskCacheStrategy.ALL)
+                        .centerCrop())
+                    .into(fileViewHolder.thumbnailImage);
             }
         }
-    }
-
-    private Bitmap createThumbnail(File file) {
-        String path = file.getAbsolutePath();
-        String name = file.getName().toLowerCase();
-        Bitmap bitmap = null;
-        try {
-            if (name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".bmp") || name.endsWith(".webp")) {
-                BitmapFactory.Options options = new BitmapFactory.Options();
-                options.inJustDecodeBounds = true;
-                BitmapFactory.decodeFile(path, options);
-                options.inSampleSize = calculateInSampleSize(options, 150, 150);
-                options.inJustDecodeBounds = false;
-                bitmap = BitmapFactory.decodeFile(path, options);
-            } else if (name.endsWith(".mp4") || name.endsWith(".mkv") || name.endsWith(".3gp") || name.endsWith(".webm")) {
-                bitmap = ThumbnailUtils.createVideoThumbnail(path, MediaStore.Video.Thumbnails.MINI_KIND);
-            }
-        } catch (Exception e) {
-            Log.e("StorageBrowserAdapter", "Error creating thumbnail for " + path, e);
-        }
-        return bitmap;
     }
 
     private int getIconForFileType(String fileName) {
@@ -199,20 +169,6 @@ public class StorageBrowserAdapter extends RecyclerView.Adapter<RecyclerView.Vie
         if (lowerFileName.endsWith(".zip") || lowerFileName.endsWith(".rar") || lowerFileName.endsWith(".7z")) return android.R.drawable.ic_menu_set_as;
         if (lowerFileName.endsWith(".mp3") || lowerFileName.endsWith(".wav") || lowerFileName.endsWith(".ogg")) return android.R.drawable.ic_media_play;
         return android.R.drawable.ic_menu_info_details;
-    }
-
-    private int calculateInSampleSize(BitmapFactory.Options options, int reqWidth, int reqHeight) {
-        final int height = options.outHeight;
-        final int width = options.outWidth;
-        int inSampleSize = 1;
-        if (height > reqHeight || width > reqWidth) {
-            final int halfHeight = height / 2;
-            final int halfWidth = width / 2;
-            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
-                inSampleSize *= 2;
-            }
-        }
-        return inSampleSize;
     }
 
     @Override
