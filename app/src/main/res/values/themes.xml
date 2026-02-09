@@ -1,31 +1,33 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
+    
     <!-- 
-      FIX: Changed parent from "DarkActionBar" to "NoActionBar".
-      This allows MainActivity to set its own Toolbar without crashing.
+      FIX 1: Main App Theme. 
+      Changed parent to "NoActionBar" to fix the crash when calling setSupportActionBar() in MainActivity.
     -->
     <style name="Theme.HFS" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Primary brand color. -->
+        <!-- Brand Colors -->
         <item name="colorPrimary">@color/hfs_primary_blue</item>
         <item name="colorPrimaryVariant">@color/hfs_primary_dark</item>
         <item name="colorOnPrimary">@color/white</item>
         
-        <!-- Secondary brand color. -->
-        <item name="colorSecondary">@color/hfs_active_green</item>
-        <item name="colorSecondaryVariant">@color/hfs_active_green</item>
-        <item name="colorOnSecondary">@color/black</item>
-        
-        <!-- Status bar color. -->
+        <!-- Status Bar & Window Background -->
         <item name="android:statusBarColor">@color/hfs_background_dark</item>
-        
-        <!-- Window background -->
         <item name="android:windowBackground">@color/hfs_background_dark</item>
 
-        <!-- Custom HFS Theme Attributes -->
+        <!-- 
+          FIX 2: Alert Dialog Theme.
+          Forces pop-ups to use a dark background so the white text is visible.
+        -->
+        <item name="android:alertDialogTheme">@style/Theme.HFS.Dialog</item>
+        <item name="alertDialogTheme">@style/Theme.HFS.Dialog</item>
+        <item name="materialAlertDialogTheme">@style/Theme.HFS.Dialog</item>
+
+        <!-- Compatibility attributes for previous build errors -->
         <item name="android:textColorPrimary">@color/dt_textColor</item>
         <item name="android:colorBackground">@color/dt_backgroundColor</item>
     </style>
 
-    <!-- HFS NoActionBar Theme (Used for Splash and Lock Screen) -->
+    <!-- Splash Screen Theme (No Action Bar) -->
     <style name="Theme.HFS.NoActionBar" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="colorPrimary">@color/hfs_primary_blue</item>
         <item name="colorPrimaryVariant">@color/hfs_primary_dark</item>
@@ -34,7 +36,20 @@
         <item name="android:windowBackground">@color/hfs_background_dark</item>
     </style>
 
-    <!-- Custom Style for the Overlay Lock Screen -->
+    <!-- 
+      FIX 3: Custom Dialog Style.
+      Sets background to HFS Dark Surface and text to White.
+    -->
+    <style name="Theme.HFS.Dialog" parent="Theme.MaterialComponents.DayNight.Dialog.Alert">
+        <item name="android:background">@color/hfs_surface_dark</item>
+        <item name="android:textColorPrimary">@color/white</item>
+        <item name="android:textColor">@color/white</item>
+        <item name="colorAccent">@color/hfs_primary_blue</item>
+        <item name="buttonBarPositiveButtonStyle">@style/Widget.MaterialComponents.Button.TextButton</item>
+        <item name="buttonBarNegativeButtonStyle">@style/Widget.MaterialComponents.Button.TextButton</item>
+    </style>
+
+    <!-- Lock Screen Overlay Style -->
     <style name="Theme.HFS.LockOverlay" parent="Theme.HFS.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
@@ -43,4 +58,5 @@
         <item name="android:windowIsFloating">false</item>
         <item name="android:backgroundDimEnabled">true</item>
     </style>
+
 </resources>
