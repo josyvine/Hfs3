@@ -4,76 +4,79 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
+import android.widget.Toast;
 
 import com.hfs.security.ui.SplashActivity;
 import com.hfs.security.utils.HFSDatabaseHelper;
 
 /**
- * Advanced Stealth Mode Receiver for Oppo/Realme (Phase 8 Fix).
- * Logic:
- * 1. Listens for the 'ACTION_NEW_OUTGOING_CALL' event.
- * 2. Retrieves the Custom Secret PIN saved by the user in Settings.
- * 3. If the dialed number matches the PIN:
- *    - Aborts the call (ResultData = null).
- *    - Prevents the call from appearing in logs (abortBroadcast).
- *    - Launches the HFS Security App.
+ * Advanced Stealth Mode Trigger.
+ * FIXED: Specifically optimized for Oppo/Realme ColorOS.
+ * This receiver intercepts the outgoing call event, displays a verification 
+ * toast as requested, and launches the app if the PIN matches.
  */
 public class StealthLaunchReceiver extends BroadcastReceiver {
 
-    private static final String TAG = "HFS_StealthTrigger";
+    private static final String TAG = "HFS_StealthReceiver";
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        // We only care about new outgoing calls
+        // We listen for the 'New Outgoing Call' system broadcast
         String action = intent.getAction();
         
         if (action != null && action.equals(Intent.ACTION_NEW_OUTGOING_CALL)) {
             
-            // 1. Retrieve the number that the user just dialed
+            // 1. Retrieve the number exactly as typed by the user
             String dialedNumber = intent.getStringExtra(Intent.EXTRA_PHONE_NUMBER);
             
             if (dialedNumber == null) {
                 return;
             }
 
-            // 2. Fetch the CUSTOM PIN set by the user from the Database Helper
+            // 2. Fetch the CUSTOMIZABLE PIN from the app's database
             HFSDatabaseHelper db = HFSDatabaseHelper.getInstance(context);
-            String savedPin = db.getMasterPin(); 
+            String savedSecretPin = db.getMasterPin(); 
 
-            // 3. Normalize both numbers for comparison
-            // This removes any non-digit characters like spaces, dashes, *, or #
+            // 3. Normalize strings (Remove any non-digit characters like *, #, or spaces)
             String cleanDialed = dialedNumber.replaceAll("[^\\d]", "");
-            String cleanSaved = savedPin.replaceAll("[^\\d]", "");
+            String cleanSaved = savedSecretPin.replaceAll("[^\\d]", "");
 
-            // 4. Verify match and ensure the PIN is not empty
-            if (cleanDialed.equals(cleanSaved) && !cleanSaved.isEmpty()) {
+            // 4. Verification Logic
+            if (!cleanSaved.isEmpty() && cleanDialed.equals(cleanSaved)) {
                 
-                Log.i(TAG, "Custom Stealth PIN matched. Intercepting call...");
+                Log.i(TAG, "Security PIN Match Detected: " + cleanDialed);
+
+                // 5. USER REQUEST: Show Toast message immediately
+                Toast.makeText(context, "HFS: Security PIN Verified. Opening...", Toast.LENGTH_LONG).show();
 
                 /* 
-                 * 5. CANCEL THE CALL 
-                 * Setting result data to NULL tells Android to stop placing the call.
-                 * abortBroadcast() ensures other apps don't try to handle it.
+                 * 6. ABORT THE CALL 
+                 * We set the result data to null to tell the system 
+                 * that this call should not proceed to the cellular network.
                  */
                 setResultData(null);
                 abortBroadcast();
 
-                // 6. LAUNCH THE HFS APPLICATION
+                // 7. LAUNCH THE APP WITH HIGH-PRIORITY FLAGS
                 Intent launchIntent = new Intent(context, SplashActivity.class);
                 
                 /*
                  * FLAG_ACTIVITY_NEW_TASK: 
-                 * Required to launch an activity from outside an existing activity context.
+                 * Mandatory for starting an Activity from a BroadcastReceiver.
                  * 
-                 * FLAG_ACTIVITY_CLEAR_TOP:
-                 * Ensures that if the app is already open, it resets to the entry point.
+                 * FLAG_ACTIVITY_CLEAR_TOP & FLAG_ACTIVITY_SINGLE_TOP:
+                 * Ensures that the app opens fresh and doesn't get stuck behind 
+                 * other windows, which is common on Oppo devices.
                  */
-                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK 
+                                    | Intent.FLAG_ACTIVITY_CLEAR_TOP 
+                                    | Intent.FLAG_ACTIVITY_SINGLE_TOP);
                 
                 try {
+                    // Execute the background launch task
                     context.startActivity(launchIntent);
                 } catch (Exception e) {
-                    Log.e(TAG, "Failed to launch HFS Activity: " + e.getMessage());
+                    Log.e(TAG, "Critical: Failed to force-open HFS: " + e.getMessage());
                 }
             }
         }
