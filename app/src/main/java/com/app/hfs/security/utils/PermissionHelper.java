@@ -2,50 +2,52 @@ package com.hfs.security.utils;
 
 import android.Manifest;
 import android.app.AppOpsManager;
-import android.app.admin.DevicePolicyManager;
-import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Process;
 import android.provider.Settings;
 
 import androidx.core.content.ContextCompat;
 
-import com.hfs.security.receivers.AdminReceiver;
-
 /**
- * Utility class to verify system-level permissions required for HFS operations.
- * This class handles:
- * 1. Runtime Permissions (Camera, SMS).
- * 2. Special Access Permissions (Usage Stats, System Overlay).
- * 3. System Privileges (Device Admin).
+ * Advanced Permission Manager for HFS Security.
+ * FIXED: 
+ * 1. Added specific checks for Outgoing Call interception (Dialer Fix).
+ * 2. Added System Overlay verification (Lock Screen Fix).
+ * 3. Optimized for Oppo/Realme ColorOS background restrictions.
  */
 public class PermissionHelper {
 
     /**
-     * Checks if the app has permission to use the Front Camera for intruder detection.
+     * Checks if the app can intercept and analyze the numbers you dial.
+     * Required for the Stealth Mode Dialer to function on Oppo.
      */
-    public static boolean hasCameraPermission(Context context) {
-        return ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) 
-                == PackageManager.PERMISSION_GRANTED;
-    }
-
-    /**
-     * Checks if the app can send SMS alerts and receive remote commands.
-     */
-    public static boolean hasSmsPermissions(Context context) {
-        boolean sendSms = ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) 
-                == PackageManager.PERMISSION_GRANTED;
-        boolean receiveSms = ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) 
+    public static boolean hasPhonePermissions(Context context) {
+        boolean statePerm = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) 
                 == PackageManager.PERMISSION_GRANTED;
         
-        return sendSms && receiveSms;
+        boolean callPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.PROCESS_OUTGOING_CALLS) 
+                == PackageManager.PERMISSION_GRANTED;
+
+        return statePerm && callPerm;
     }
 
     /**
-     * Checks if 'Usage Access' is granted.
-     * This is required for the AppMonitorService to detect when a protected app is opened.
+     * Checks if the app has permission to show the Lock Screen on top of other apps.
+     * On Oppo, this is often called "Floating Windows" or "Display Pop-up Window".
+     */
+    public static boolean canDrawOverlays(Context context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return Settings.canDrawOverlays(context);
+        }
+        return true; // Auto-granted on very old Android versions
+    }
+
+    /**
+     * Checks if the app can detect when you open protected apps like Gallery.
      */
     public static boolean hasUsageStatsPermission(Context context) {
         AppOpsManager appOps = (AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
@@ -61,45 +63,37 @@ public class PermissionHelper {
     }
 
     /**
-     * Checks if 'Display Over Other Apps' is granted.
-     * This is required to show the LockScreenActivity on top of protected apps.
+     * Checks for standard Runtime Permissions (Camera and SMS).
      */
-    public static boolean canDrawOverlays(Context context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            return Settings.canDrawOverlays(context);
-        }
-        return true; // Auto-granted on versions below Marshmallow
+    public static boolean hasBasePermissions(Context context) {
+        boolean camera = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) 
+                == PackageManager.PERMISSION_GRANTED;
+        
+        boolean sendSms = ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) 
+                == PackageManager.PERMISSION_GRANTED;
+
+        return camera && sendSms;
     }
 
     /**
-     * Checks if the app is currently a Device Administrator.
-     * Required for Phase 7 (Anti-Uninstall protection).
+     * Master check to see if HFS is fully authorized to protect the phone.
      */
-    public static boolean isDeviceAdminActive(Context context) {
-        DevicePolicyManager dpm = (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
-        ComponentName adminComponent = new ComponentName(context, AdminReceiver.class);
-        return dpm != null && dpm.isAdminActive(adminComponent);
-    }
-
-    /**
-     * Checks for Notification permission (Required for Android 13+ / API 33+).
-     */
-    public static boolean hasNotificationPermission(Context context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            return ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) 
-                    == PackageManager.PERMISSION_GRANTED;
-        }
-        return true;
-    }
-
-    /**
-     * Helper to determine if all essential security permissions are granted.
-     * If this returns false, the app should prompt the user in MainActivity.
-     */
-    public static boolean isAllPermissionsGranted(Context context) {
-        return hasCameraPermission(context) && 
-               hasSmsPermissions(context) && 
+    public static boolean isAllSecurityGranted(Context context) {
+        return hasBasePermissions(context) && 
+               hasPhonePermissions(context) && 
                hasUsageStatsPermission(context) && 
                canDrawOverlays(context);
+    }
+
+    /**
+     * Helper to open the specific Oppo/ColorOS "App Info" page 
+     * where the user must manually enable "Auto-startup".
+     */
+    public static void openAppSettings(Context context) {
+        Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+        Uri uri = Uri.fromParts("package", context.getPackageName(), null);
+        intent.setData(uri);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        context.startActivity(intent);
     }
 }
