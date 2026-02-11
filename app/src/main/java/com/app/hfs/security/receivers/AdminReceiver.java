@@ -14,10 +14,10 @@ import com.hfs.security.utils.SmsHelper;
 
 /**
  * Device Administration Receiver.
- * FIXED: Implemented 'Lost Phone' tracking logic.
- * This component monitors system-level security events. 
- * If a thief or intruder fails to unlock the phone (wrong finger/PIN), 
- * it automatically triggers the GPS location and sends a high-priority SMS alert.
+ * FIXED: Lost Phone Monitoring.
+ * This component handles system-level security breaches. 
+ * If a thief or intruder fails the phone's main lock screen (PIN, Pattern, or Fingerprint),
+ * this receiver triggers the GPS location capture and sends a high-priority alert.
  */
 public class AdminReceiver extends DeviceAdminReceiver {
 
@@ -26,60 +26,60 @@ public class AdminReceiver extends DeviceAdminReceiver {
     @Override
     public void onEnabled(@NonNull Context context, @NonNull Intent intent) {
         super.onEnabled(context, intent);
-        Toast.makeText(context, "HFS: Lost Phone Protection Enabled", Toast.LENGTH_SHORT).show();
+        Toast.makeText(context, "HFS: System Protection Enabled", Toast.LENGTH_SHORT).show();
     }
 
     @Override
     public void onDisabled(@NonNull Context context, @NonNull Intent intent) {
         super.onDisabled(context, intent);
-        Toast.makeText(context, "HFS: Warning - Anti-Theft Protection Disabled", Toast.LENGTH_SHORT).show();
+        Toast.makeText(context, "HFS: Warning - System Protection Disabled", Toast.LENGTH_SHORT).show();
     }
 
     /**
-     * ENHANCEMENT: THE LOST PHONE TRIGGER.
-     * Triggered by the Android System when a screen unlock attempt fails.
+     * THE LOST PHONE TRIGGER:
+     * Triggered by the Android OS when a screen unlock attempt fails.
+     * FIXED: Now immediately initiates GPS tracking and SMS alerts.
      */
     @Override
     public void onPasswordFailed(@NonNull Context context, @NonNull Intent intent) {
         super.onPasswordFailed(context, intent);
         
-        Log.e(TAG, "DEVICE UNLOCK FAILED: Potential Intruder/Thief detected.");
+        Log.e(TAG, "SECURITY BREACH: Device unlock failed. Detecting intruder location...");
 
-        // 1. Check how many times it has failed (Optional threshold)
+        // 1. Check attempt count from System Policy Manager
         DevicePolicyManager dpm = (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
         int failedAttempts = dpm.getCurrentFailedPasswordAttempts();
 
-        // 2. TRIGGER THE SECURITY FLOW
-        // We fetch the location immediately and send it to the owner.
+        // 2. TRIGGER GPS & SMS ALERT FLOW
+        // We call the LocationHelper to get coordinates and then pipe them to SmsHelper.
         LocationHelper.getDeviceLocation(context, new LocationHelper.LocationResultCallback() {
             @Override
             public void onLocationFound(String mapLink) {
-                // Send SMS with GPS coordinates
-                SmsHelper.sendAlertSms(context, "DEVICE LOCK SCREEN (Lost Phone Mode)", mapLink);
+                // Send alert with Google Maps link to the second phone
+                SmsHelper.sendAlertSms(context, "PHONE LOCK SCREEN (Lost Phone Mode)", mapLink);
             }
 
             @Override
             public void onLocationFailed(String error) {
-                // Send SMS even if GPS fails, informing the owner of the attempt
-                SmsHelper.sendAlertSms(context, "DEVICE LOCK SCREEN (Lost Phone Mode)", "GPS Location Unavailable");
+                // If GPS is disabled or blocked, send the alert without the link
+                SmsHelper.sendAlertSms(context, "PHONE LOCK SCREEN (Lost Phone Mode)", "GPS Location Unavailable");
             }
         });
 
-        // 3. LOGGING FOR INTERNALS
-        Log.i(TAG, "Intruder Alert triggered via Device Admin. Attempt count: " + failedAttempts);
+        Log.i(TAG, "Intruder Alert sent for failed attempt #" + failedAttempts);
     }
 
     @Override
     public void onPasswordSucceeded(@NonNull Context context, @NonNull Intent intent) {
         super.onPasswordSucceeded(context, intent);
-        Log.d(TAG, "Device unlocked by legitimate owner.");
+        Log.d(TAG, "Device unlocked by owner.");
     }
 
     /**
-     * Text shown to the user if they try to deactivate HFS Admin.
+     * Message shown to the user when they try to deactivate this security component.
      */
     @Override
     public CharSequence onDisableRequested(@NonNull Context context, @NonNull Intent intent) {
-        return "Warning: Disabling HFS will stop the 'Lost Phone' GPS tracking and Alert system.";
+        return "CRITICAL: Disabling HFS Admin will stop the 'Lost Phone' GPS tracking and Alert system.";
     }
 }
