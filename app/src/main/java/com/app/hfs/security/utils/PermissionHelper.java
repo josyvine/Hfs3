@@ -14,16 +14,25 @@ import androidx.core.content.ContextCompat;
 
 /**
  * Advanced Permission Manager for HFS Security.
- * FIXED: 
- * 1. Added specific checks for Outgoing Call interception (Dialer Fix).
- * 2. Added System Overlay verification (Lock Screen Fix).
- * 3. Optimized for Oppo/Realme ColorOS background restrictions.
+ * UPDATED:
+ * 1. Added checks for GPS Location permissions (for Map link).
+ * 2. Added checks for Call Interception permissions (for Dialer fix).
+ * 3. Integrated verification for the new security enhancements.
  */
 public class PermissionHelper {
 
     /**
-     * Checks if the app can intercept and analyze the numbers you dial.
-     * Required for the Stealth Mode Dialer to function on Oppo.
+     * Checks if the app can access GPS coordinates.
+     * Required for the Google Maps link in the alert SMS.
+     */
+    public static boolean hasLocationPermissions(Context context) {
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) 
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /**
+     * Checks if the app can intercept dialed numbers.
+     * Required for the Stealth Mode Dialer to function on Oppo/Realme.
      */
     public static boolean hasPhonePermissions(Context context) {
         boolean statePerm = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) 
@@ -36,18 +45,18 @@ public class PermissionHelper {
     }
 
     /**
-     * Checks if the app has permission to show the Lock Screen on top of other apps.
-     * On Oppo, this is often called "Floating Windows" or "Display Pop-up Window".
+     * Checks if the app has permission to show the Lock Screen overlay.
+     * On Oppo, this is the "Floating Windows" permission.
      */
     public static boolean canDrawOverlays(Context context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             return Settings.canDrawOverlays(context);
         }
-        return true; // Auto-granted on very old Android versions
+        return true; 
     }
 
     /**
-     * Checks if the app can detect when you open protected apps like Gallery.
+     * Checks if the app can detect foreground app launches.
      */
     public static boolean hasUsageStatsPermission(Context context) {
         AppOpsManager appOps = (AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
@@ -76,18 +85,18 @@ public class PermissionHelper {
     }
 
     /**
-     * Master check to see if HFS is fully authorized to protect the phone.
+     * Master check to see if HFS has all permissions for the new enhancements.
      */
     public static boolean isAllSecurityGranted(Context context) {
         return hasBasePermissions(context) && 
                hasPhonePermissions(context) && 
+               hasLocationPermissions(context) && 
                hasUsageStatsPermission(context) && 
                canDrawOverlays(context);
     }
 
     /**
-     * Helper to open the specific Oppo/ColorOS "App Info" page 
-     * where the user must manually enable "Auto-startup".
+     * Helper to open app settings for manual Oppo Auto-startup enabling.
      */
     public static void openAppSettings(Context context) {
         Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
