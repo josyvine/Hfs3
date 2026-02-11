@@ -20,18 +20,15 @@ import androidx.core.app.NotificationCompat;
 import com.hfs.security.HFSApplication;
 import com.hfs.security.R;
 import com.hfs.security.ui.LockScreenActivity;
-import com.hfs.security.ui.MainActivity;
 import com.hfs.security.utils.HFSDatabaseHelper;
 
 import java.util.Set;
 
 /**
  * The core Background Service for HFS.
- * FIXED & UPDATED:
- * 1. Secured the Notification: Clicking the background notification now 
- *    triggers the Lock Screen instead of bypassing directly to the Dashboard.
- * 2. High-Frequency Monitoring: Maintained at 500ms for Oppo background stability.
- * 3. Self-Lock Support: Logic updated to allow HFS to protect its own settings.
+ * FIXED: Implemented 'Grace Period' logic to stop the infinite locking loop.
+ * After a successful owner unlock, the service will ignore that specific app 
+ * for 30 seconds to allow normal usage.
  */
 public class AppMonitorService extends Service {
 
@@ -44,6 +41,20 @@ public class AppMonitorService extends Service {
     private HFSDatabaseHelper db;
     private String lastPackageInForeground = "";
 
+    // SESSION GRACE PERIOD VARIABLES
+    private static String unlockedPackage = "";
+    private static long lastUnlockTimestamp = 0;
+    private static final long GRACE_PERIOD_MS = 30000; // 30 Seconds
+
+    /**
+     * Static method to be called by LockScreenActivity upon successful verify.
+     * This tells the service to stop locking this app temporarily.
+     */
+    public static void unlockSession(String packageName) {
+        unlockedPackage = packageName;
+        lastUnlockTimestamp = System.currentTimeMillis();
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -54,23 +65,17 @@ public class AppMonitorService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // 1. Start as a high-priority Foreground Service
-        // Updated notification logic to prevent intruder bypass
+        // Start Foreground Service with secured notification
         startForeground(NOTIFICATION_ID, createSecurityNotification());
 
-        // 2. Start the aggressive monitoring loop
+        // Start the aggressive monitoring loop
         startMonitoringLoop();
 
         return START_STICKY; 
     }
 
-    /**
-     * Creates the persistent notification.
-     * FIX: The PendingIntent now points to LockScreenActivity. 
-     * This ensures that if an intruder clicks the notification, they are blocked.
-     */
     private Notification createSecurityNotification() {
-        // We target LockScreenActivity as the destination for notification clicks
+        // Secure the intent: Clicks now trigger the Lock Screen first
         Intent lockIntent = new Intent(this, LockScreenActivity.class);
         lockIntent.putExtra("TARGET_APP_NAME", "HFS Settings");
         lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -90,48 +95,48 @@ public class AppMonitorService extends Service {
                 .build();
     }
 
-    /**
-     * The aggressive loop that checks for foreground app changes.
-     */
     private void startMonitoringLoop() {
         monitorRunnable = new Runnable() {
             @Override
             public void run() {
                 String currentApp = getForegroundPackageName();
 
-                // Logic: Only act if the foreground app is different from the last check
                 if (!currentApp.equals(lastPackageInForeground)) {
-                    
                     lastPackageInForeground = currentApp;
                     
-                    // Check if the newly opened app is in the protected list
                     Set<String> protectedApps = db.getProtectedPackages();
                     
-                    /*
-                     * ENHANCEMENT: HFS can now protect itself.
-                     * If 'com.hfs.security' is added to the protected list, 
-                     * the lock screen will trigger when the user opens the app dashboard.
-                     */
                     if (protectedApps.contains(currentApp)) {
-                        Log.i(TAG, "PROTECTED APP ACCESS: " + currentApp);
+                        
+                        // FIX: CHECK IF THE SESSION IS CURRENTLY GRANTED
+                        if (currentApp.equals(unlockedPackage)) {
+                            long timePassed = System.currentTimeMillis() - lastUnlockTimestamp;
+                            if (timePassed < GRACE_PERIOD_MS) {
+                                // Within 30 seconds of owner unlock - Do NOT trigger loop
+                                Log.d(TAG, "Grace Period Active for: " + currentApp);
+                                monitorHandler.postDelayed(this, MONITOR_TICK_MS);
+                                return;
+                            } else {
+                                // Session expired - Clear it
+                                unlockedPackage = "";
+                            }
+                        }
+
+                        Log.i(TAG, "TRIGGERING LOCK FOR: " + currentApp);
                         triggerLockOverlay(currentApp);
                     }
                 }
 
-                // Repeat every 500ms for maximum security
                 monitorHandler.postDelayed(this, MONITOR_TICK_MS);
             }
         };
         monitorHandler.post(monitorRunnable);
     }
 
-    /**
-     * Uses UsageStatsManager to identify the app currently in use.
-     */
     private String getForegroundPackageName() {
         UsageStatsManager usm = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
         long endTime = System.currentTimeMillis();
-        long startTime = endTime - 1000 * 10; // Check last 10 seconds of events
+        long startTime = endTime - 1000 * 10;
 
         UsageEvents events = usm.queryEvents(startTime, endTime);
         UsageEvents.Event event = new UsageEvents.Event();
@@ -146,9 +151,6 @@ public class AppMonitorService extends Service {
         return currentPkg;
     }
 
-    /**
-     * Launches the LockScreenActivity overlay with high-priority flags.
-     */
     private void triggerLockOverlay(String packageName) {
         String appName = getAppNameFromPackage(packageName);
         
@@ -156,7 +158,6 @@ public class AppMonitorService extends Service {
         lockIntent.putExtra("TARGET_APP_PACKAGE", packageName);
         lockIntent.putExtra("TARGET_APP_NAME", appName);
         
-        // Flags optimized for Oppo/Realme to force the activity to the front
         lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK 
                           | Intent.FLAG_ACTIVITY_SINGLE_TOP 
                           | Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -169,9 +170,6 @@ public class AppMonitorService extends Service {
         }
     }
 
-    /**
-     * Resolves app display name from the package ID.
-     */
     private String getAppNameFromPackage(String packageName) {
         PackageManager pm = getPackageManager();
         try {
@@ -188,7 +186,6 @@ public class AppMonitorService extends Service {
             monitorHandler.removeCallbacks(monitorRunnable);
         }
         super.onDestroy();
-        Log.d(TAG, "Security Monitor Service Stopped");
     }
 
     @Nullable
