@@ -14,30 +14,42 @@ import androidx.biometric.BiometricManager;
 import androidx.core.content.ContextCompat;
 
 /**
- * Advanced Permission & Hardware Manager for HFS Security.
- * UPDATED: 
- * 1. Step 1 Implementation: Added Class 3 (Strong) Biometric hardware detection.
- * 2. Maintained GPS, Phone, and Overlay verification methods.
+ * Advanced Permission & Hardware Manager.
+ * FIXED: Implemented a specific Hardware Check for Face Authentication 
+ * to distinguish between Face and Fingerprint sensors.
  */
 public class PermissionHelper {
 
     /**
-     * Step 1: Hardware Capability Check.
-     * Detects if the device has official secure hardware (Class 3) for Face/Fingerprint.
-     * Logic: Asks Android if 'BIOMETRIC_STRONG' is supported and enrolled.
+     * Step 1: Specific Face Hardware Check.
+     * Logic: Verifies if the phone has dedicated Face hardware (3D/IR).
+     * This prevents the app from accidentally defaulting to Fingerprint 
+     * when we specifically want a Face scan.
      */
-    public static boolean hasClass3Biometrics(Context context) {
-        BiometricManager biometricManager = BiometricManager.from(context);
+    public static boolean hasSystemFaceHardware(Context context) {
+        PackageManager pm = context.getPackageManager();
         
-        // BIOMETRIC_STRONG (Class 3) indicates hardware that meets high security 
-        // standards (3D sensors / secure TEE processing).
-        int canAuthenticate = biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG);
+        // 1. Check for the official Android Face Feature
+        // This feature string is the standard for Face hardware
+        boolean hasFaceFeature = false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            hasFaceFeature = pm.hasSystemFeature(PackageManager.FEATURE_FACE);
+        } else {
+            // Android 9 (Oppo) fallback check for common face hardware strings
+            hasFaceFeature = pm.hasSystemFeature("android.hardware.biometrics.face") ||
+                             pm.hasSystemFeature("com.oppo.face.trust");
+        }
+
+        // 2. Cross-reference with BiometricManager
+        BiometricManager bm = BiometricManager.from(context);
+        int canAuth = bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG);
         
-        return canAuthenticate == BiometricManager.BIOMETRIC_SUCCESS;
+        // Match: System must have Face hardware AND be ready to use Strong Biometrics
+        return hasFaceFeature && (canAuth == BiometricManager.BIOMETRIC_SUCCESS);
     }
 
     /**
-     * Checks if the app can access GPS coordinates for the Map link enhancement.
+     * Checks if the app can access GPS coordinates for tracking.
      */
     public static boolean hasLocationPermissions(Context context) {
         return ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) 
@@ -96,9 +108,6 @@ public class PermissionHelper {
         return camera && sendSms;
     }
 
-    /**
-     * Master check to see if HFS is fully authorized to protect the phone.
-     */
     public static boolean isAllSecurityGranted(Context context) {
         return hasBasePermissions(context) && 
                hasPhonePermissions(context) && 
@@ -107,9 +116,6 @@ public class PermissionHelper {
                canDrawOverlays(context);
     }
 
-    /**
-     * Helper to open app settings for manual Oppo Auto-startup enabling.
-     */
     public static void openAppSettings(Context context) {
         Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
         Uri uri = Uri.fromParts("package", context.getPackageName(), null);
