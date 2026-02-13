@@ -14,10 +14,9 @@ import com.hfs.security.utils.SmsHelper;
 
 /**
  * Device Administration Receiver.
- * FIXED: Lost Phone Monitoring.
- * This component handles system-level security breaches. 
- * If a thief or intruder fails the phone's main lock screen (PIN, Pattern, or Fingerprint),
- * this receiver triggers the GPS location capture and sends a high-priority alert.
+ * FIXED: 
+ * 1. Resolved build error by passing 4 arguments to SmsHelper.
+ * 2. Optimized 'Lost Phone' tracking logic to trigger alert on system fingerprint fail.
  */
 public class AdminReceiver extends DeviceAdminReceiver {
 
@@ -38,7 +37,6 @@ public class AdminReceiver extends DeviceAdminReceiver {
     /**
      * THE LOST PHONE TRIGGER:
      * Triggered by the Android OS when a screen unlock attempt fails.
-     * FIXED: Now immediately initiates GPS tracking and SMS alerts.
      */
     @Override
     public void onPasswordFailed(@NonNull Context context, @NonNull Intent intent) {
@@ -55,18 +53,34 @@ public class AdminReceiver extends DeviceAdminReceiver {
         LocationHelper.getDeviceLocation(context, new LocationHelper.LocationResultCallback() {
             @Override
             public void onLocationFound(String mapLink) {
-                // Send alert with Google Maps link to the second phone
-                SmsHelper.sendAlertSms(context, "PHONE LOCK SCREEN (Lost Phone Mode)", mapLink);
+                /*
+                 * FIXED: Now passes 4 parameters to match the SmsHelper definition.
+                 * required: Context, String, String, String
+                 */
+                SmsHelper.sendAlertSms(
+                        context, 
+                        "PHONE LOCK SCREEN", 
+                        mapLink, 
+                        "System Unlock Failure"
+                );
             }
 
             @Override
             public void onLocationFailed(String error) {
-                // If GPS is disabled or blocked, send the alert without the link
-                SmsHelper.sendAlertSms(context, "PHONE LOCK SCREEN (Lost Phone Mode)", "GPS Location Unavailable");
+                /*
+                 * FIXED: Now passes 4 parameters to match the SmsHelper definition.
+                 * required: Context, String, String, String
+                 */
+                SmsHelper.sendAlertSms(
+                        context, 
+                        "PHONE LOCK SCREEN", 
+                        "GPS Location Unavailable", 
+                        "System Unlock Failure"
+                );
             }
         });
 
-        Log.i(TAG, "Intruder Alert sent for failed attempt #" + failedAttempts);
+        Log.i(TAG, "Intruder Alert initiated. Attempt count: " + failedAttempts);
     }
 
     @Override
@@ -75,9 +89,6 @@ public class AdminReceiver extends DeviceAdminReceiver {
         Log.d(TAG, "Device unlocked by owner.");
     }
 
-    /**
-     * Message shown to the user when they try to deactivate this security component.
-     */
     @Override
     public CharSequence onDisableRequested(@NonNull Context context, @NonNull Intent intent) {
         return "CRITICAL: Disabling HFS Admin will stop the 'Lost Phone' GPS tracking and Alert system.";
