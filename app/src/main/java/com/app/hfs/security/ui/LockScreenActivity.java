@@ -1,7 +1,11 @@
 package com.hfs.security.ui;
 
 import android.Manifest;
+import android.app.KeyguardManager;
+import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -11,6 +15,7 @@ import android.view.WindowManager;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.biometric.BiometricManager;
@@ -40,14 +45,16 @@ import java.util.concurrent.Executors;
 
 /**
  * The Security Overlay Activity.
- * FIXED BUILD ERRORS:
- * 1. Removed reference to 'scanningIndicator' (View was removed from XML).
- * 2. Fixed SmsHelper call to include all 4 required arguments.
- * 3. Maintains System-Native Unlock and Invisible Photo capture.
+ * FIXED: 
+ * 1. Resolved Android 9 (API 28) Authenticator combination crash.
+ * 2. Implemented KeyguardManager fallback for System PIN on older devices.
+ * 3. Maintained Invisible Intruder Capture and HFS MPIN backup.
  */
 public class LockScreenActivity extends AppCompatActivity {
 
     private static final String TAG = "HFS_LockScreen";
+    private static final int SYSTEM_CREDENTIAL_REQUEST_CODE = 505;
+
     private ActivityLockScreenBinding binding;
     private ExecutorService cameraExecutor;
     private HFSDatabaseHelper db;
@@ -65,7 +72,7 @@ public class LockScreenActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Signal service to prevent re-triggering while this activity is open
+        // Prevent loop re-triggering while this screen is active
         AppMonitorService.isLockActive = true;
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
@@ -80,23 +87,25 @@ public class LockScreenActivity extends AppCompatActivity {
         cameraExecutor = Executors.newSingleThreadExecutor();
         targetPackage = getIntent().getStringExtra("TARGET_APP_PACKAGE");
 
-        // FIX: Removed scanningIndicator.setVisibility as it no longer exists in XML
         binding.lockContainer.setVisibility(View.VISIBLE);
 
-        // 1. Initialize the Invisible Camera for immediate intruder capture
+        // 1. Setup Camera for silent intruder capture
         startInvisibleCamera();
 
-        // 2. Setup the System Biometric/Credential Logic
+        // 2. Setup Security based on Android Version (Fixes Oppo Android 9 Crash)
         setupSystemSecurity();
 
-        // 3. Automatically trigger the system unlock dialog
+        // 3. Trigger initial authentication
         triggerSystemAuth();
 
-        // Button Listeners
+        // UI Listeners
         binding.btnUnlockPin.setOnClickListener(v -> checkMpinAndUnlock());
         binding.btnFingerprint.setOnClickListener(v -> triggerSystemAuth());
     }
 
+    /**
+     * Logic: Splits the logic between Android 10+ and Android 9 (Your device).
+     */
     private void setupSystemSecurity() {
         biometricExecutor = ContextCompat.getMainExecutor(this);
         biometricPrompt = new BiometricPrompt(this, biometricExecutor, 
@@ -110,13 +119,16 @@ public class LockScreenActivity extends AppCompatActivity {
             @Override
             public void onAuthenticationFailed() {
                 super.onAuthenticationFailed();
-                Log.w(TAG, "System security attempt failed.");
+                Log.w(TAG, "Biometric failed.");
             }
 
             @Override
             public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
                 super.onAuthenticationError(errorCode, errString);
-                if (errorCode != BiometricPrompt.ERROR_USER_CANCELED && errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON) {
+                // On API 28, the 'Negative Button' click is used to fall back to System PIN
+                if (errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON) {
+                    showSystemCredentialPicker();
+                } else if (errorCode != BiometricPrompt.ERROR_USER_CANCELED) {
                     triggerIntruderAlert();
                 }
             }
@@ -124,18 +136,55 @@ public class LockScreenActivity extends AppCompatActivity {
 
         BiometricPrompt.PromptInfo.Builder builder = new BiometricPrompt.PromptInfo.Builder()
                 .setTitle("HFS Security")
-                .setSubtitle("Use your phone's screen lock to unlock")
-                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG 
-                                        | BiometricManager.Authenticators.DEVICE_CREDENTIAL);
+                .setSubtitle("Authenticate to access your app");
+
+        // CRITICAL FIX: Android 9 (API 28) does NOT support DEVICE_CREDENTIAL in this builder.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10 and above logic
+            builder.setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG 
+                                            | BiometricManager.Authenticators.DEVICE_CREDENTIAL);
+        } else {
+            // Android 9 (Oppo CPH1937) logic
+            // We must use Negative Button to launch the Device Credential Picker manually
+            builder.setNegativeButtonText("Use System PIN");
+        }
 
         promptInfo = builder.build();
+    }
+
+    /**
+     * Fallback for Android 9: Opens the System PIN/Pattern/Password screen.
+     */
+    private void showSystemCredentialPicker() {
+        KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+        if (km != null && km.isDeviceSecure()) {
+            Intent intent = km.createConfirmDeviceCredentialIntent("HFS Security", "Enter your phone lock to proceed");
+            if (intent != null) {
+                startActivityForResult(intent, SYSTEM_CREDENTIAL_REQUEST_CODE);
+            }
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == SYSTEM_CREDENTIAL_REQUEST_CODE) {
+            if (resultCode == RESULT_OK) {
+                // Success via System PIN/Pattern
+                onOwnerVerified();
+            } else {
+                // User failed or canceled the System PIN
+                triggerIntruderAlert();
+            }
+        }
     }
 
     private void triggerSystemAuth() {
         try {
             biometricPrompt.authenticate(promptInfo);
         } catch (Exception e) {
-            Log.e(TAG, "System Auth Unavailable: " + e.getMessage());
+            // Fallback to PIN picker if Biometrics are not enrolled
+            showSystemCredentialPicker();
         }
     }
 
@@ -144,11 +193,9 @@ public class LockScreenActivity extends AppCompatActivity {
         if (targetPackage != null) {
             AppMonitorService.unlockSession(targetPackage);
         }
-        
         if (lastCapturedFrame != null) {
             lastCapturedFrame.close();
         }
-        
         finish();
     }
 
@@ -180,7 +227,7 @@ public class LockScreenActivity extends AppCompatActivity {
                 cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis);
 
             } catch (ExecutionException | InterruptedException e) {
-                Log.e(TAG, "CameraX Error: " + e.getMessage());
+                Log.e(TAG, "Camera Fail: " + e.getMessage());
             }
         }, ContextCompat.getMainExecutor(this));
     }
@@ -204,9 +251,8 @@ public class LockScreenActivity extends AppCompatActivity {
             if (lastCapturedFrame != null) {
                 FileSecureHelper.saveIntruderCapture(LockScreenActivity.this, lastCapturedFrame);
             }
-
             fetchLocationAndSendAlert();
-            Toast.makeText(this, "⚠ Security Breach Recorded", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "⚠ Unauthorized access logged", Toast.LENGTH_LONG).show();
         });
     }
 
@@ -217,14 +263,12 @@ public class LockScreenActivity extends AppCompatActivity {
         LocationHelper.getDeviceLocation(this, new LocationHelper.LocationResultCallback() {
             @Override
             public void onLocationFound(String mapLink) {
-                // FIX: Added the 4th argument "Security Breach" to match SmsHelper signature
-                SmsHelper.sendAlertSms(LockScreenActivity.this, finalAppName, mapLink, "Security Breach");
+                SmsHelper.sendAlertSms(LockScreenActivity.this, finalAppName, mapLink, "System Security Failure");
             }
 
             @Override
             public void onLocationFailed(String error) {
-                // FIX: Added the 4th argument "Security Breach" to match SmsHelper signature
-                SmsHelper.sendAlertSms(LockScreenActivity.this, finalAppName, "GPS Unavailable", "Security Breach");
+                SmsHelper.sendAlertSms(LockScreenActivity.this, finalAppName, "GPS Signal Lost", "System Security Failure");
             }
         });
     }
