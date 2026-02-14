@@ -30,11 +30,10 @@ import com.hfs.security.utils.HFSDatabaseHelper;
 
 /**
  * The Primary Host Activity for HFS Security.
- * UPDATED & FIXED: 
- * 1. Resolved Dashboard re-selection crash.
- * 2. Added Runtime Permissions for GPS Location (Map Link Enhancement).
- * 3. Added Runtime Permissions for Dialer/Call interception (Oppo Fix).
- * 4. Stabilized Navigation Controller and Toolbar integration.
+ * FIXED BUILD ERRORS: 
+ * 1. Removed reference to the deleted FaceSetupActivity.
+ * 2. Maintained Dashboard re-selection crash fix.
+ * 3. Maintained all Runtime Permissions (GPS, Dialer, Camera).
  */
 public class MainActivity extends AppCompatActivity {
 
@@ -54,13 +53,13 @@ public class MainActivity extends AppCompatActivity {
         db = HFSDatabaseHelper.getInstance(this);
 
         // 2. Setup custom Toolbar
-        // Parent theme in themes.xml is already set to NoActionBar to prevent crash
+        // Uses NoActionBar parent theme to prevent crash
         setSupportActionBar(binding.toolbar);
 
         // 3. Initialize Navigation Component
         NavHostFragment navHostFragment = (NavHostFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.nav_host_fragment);
-        
+
         if (navHostFragment != null) {
             navController = navHostFragment.getNavController();
 
@@ -74,23 +73,22 @@ public class MainActivity extends AppCompatActivity {
             // Link NavController to Toolbar and Bottom Navigation
             NavigationUI.setupActionBarWithNavController(this, navController, appBarConfiguration);
             NavigationUI.setupWithNavController(binding.bottomNav, navController);
-            
+
             // FIX FOR DASHBOARD CRASH:
-            // Prevents the Navigation component from trying to re-load the current 
-            // fragment if the user taps the icon of the tab they are already viewing.
+            // Prevents re-loading fragments when the active tab is clicked again.
             binding.bottomNav.setOnItemReselectedListener(item -> {
-                // Do nothing on re-selection to maintain fragment stability
+                // Do nothing to maintain stability
             });
         }
 
-        // 4. Check for and request all high-security permissions (including GPS and Phone)
+        // 4. Request all high-security permissions (GPS, Phone, Camera, SMS)
         checkAllSecurityPermissions();
 
-        // 5. Handle Setup redirection if necessary
+        // 5. Setup Redirection
+        // Removed FaceSetupActivity logic because HFS now uses System-Native Security.
+        // Once the user sets their MPIN and number in settings, setup is considered done.
         if (getIntent().getBooleanExtra("SHOW_SETUP", false)) {
-            if (!db.isSetupComplete()) {
-                startActivity(new Intent(this, FaceSetupActivity.class));
-            }
+            Toast.makeText(this, "Welcome to HFS. Configure your MPIN in Settings.", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -131,7 +129,6 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * Verifies the critical permissions required for HFS Security.
-     * UPDATED: Now includes mandatory Dialer, Phone State, and GPS Location.
      */
     private void checkAllSecurityPermissions() {
         // List of mandatory runtime permissions
@@ -141,7 +138,7 @@ public class MainActivity extends AppCompatActivity {
                 Manifest.permission.RECEIVE_SMS,
                 Manifest.permission.READ_PHONE_STATE,
                 Manifest.permission.PROCESS_OUTGOING_CALLS,
-                Manifest.permission.ACCESS_FINE_LOCATION,   // Added for Location Enhancement
+                Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.ACCESS_COARSE_LOCATION
         };
 
@@ -149,7 +146,7 @@ public class MainActivity extends AppCompatActivity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) 
                     != PackageManager.PERMISSION_GRANTED) {
-                
+
                 String[] extended = new String[permissions.length + 1];
                 System.arraycopy(permissions, 0, extended, 0, permissions.length);
                 extended[permissions.length] = Manifest.permission.POST_NOTIFICATIONS;
@@ -171,14 +168,14 @@ public class MainActivity extends AppCompatActivity {
             ActivityCompat.requestPermissions(this, permissions, PERMISSION_REQUEST_CODE);
         }
 
-        // Check for System Overlay Permission (For the App Lock Screen)
+        // Check for System Overlay Permission
         if (!Settings.canDrawOverlays(this)) {
             showPermissionExplanation("Overlay Permission Required", 
                     "HFS needs 'Draw Over Other Apps' permission to block access to protected applications.",
                     new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
         }
 
-        // Check for Usage Stats Permission (For App Launch Detection)
+        // Check for Usage Stats Permission
         if (!hasUsageStatsPermission()) {
             showPermissionExplanation("Usage Access Required", 
                     "HFS needs 'Usage Access' to monitor when private apps are being opened.",
@@ -209,13 +206,16 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
+    /**
+     * UPDATED: Help dialog reflecting the System-Native security plan.
+     */
     private void showHelpDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("HFS Security Help")
-                .setMessage("1. Use 'Rescan' in Settings to save your face identity.\n\n" +
-                           "2. Select Gallery/Files in the 'Apps' tab. You can also protect HFS itself.\n\n" +
-                           "3. Setup your Trusted Phone number for SMS & GPS alerts.\n\n" +
-                           "4. To open HFS if hidden: Dial your PIN (e.g. 2080) or *#2080# and press Call.")
+                .setMessage("1. Ensure your phone has a screen lock (PIN, Fingerprint, or Face) enabled.\n\n" +
+                           "2. In Settings, configure your HFS MPIN and Trusted Number for alerts.\n\n" +
+                           "3. Select Gallery/Files in the 'Apps' tab to protect them.\n\n" +
+                           "4. To open HFS if hidden: Dial your PIN and press Call.")
                 .setPositiveButton("Got it", null)
                 .show();
     }
