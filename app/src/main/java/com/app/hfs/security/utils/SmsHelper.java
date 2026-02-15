@@ -12,10 +12,10 @@ import java.util.Locale;
 
 /**
  * Advanced Alert & SMS Transmission Utility.
- * UPDATED for "Zero-Fail" Plan:
- * 1. Breach Specificity: Differentiates between Face and Fingerprint failures.
- * 2. Routing Fix: Ensures international formatting (+91) for external phones.
- * 3. Strict Cooldown: Limits alerts to 3 messages per 5-minute window.
+ * UPDATED for Google Drive Integration:
+ * 1. Includes Google Drive shareable link in the alert content.
+ * 2. Implements "Pending Upload" status for offline scenarios.
+ * 3. Follows the requested professional alert message format.
  */
 public class SmsHelper {
 
@@ -25,18 +25,19 @@ public class SmsHelper {
     private static final int MAX_MSGS = 3; // Exactly 3 messages limit
 
     /**
-     * Sends a detailed security alert SMS.
+     * Sends the finalized HFS Security Alert SMS.
      * 
      * @param context App context.
      * @param targetApp Name of the app triggered.
      * @param mapLink Google Maps URL.
-     * @param alertType "Face Mismatch" or "Fingerprint Failure".
+     * @param alertType "System Security Failure" or specific breach.
+     * @param driveLink The shareable link to the intruder photo on Google Drive.
      */
-    public static void sendAlertSms(Context context, String targetApp, String mapLink, String alertType) {
+    public static void sendAlertSms(Context context, String targetApp, String mapLink, String alertType, String driveLink) {
         
-        // 1. VERIFY COOLDOWN STATUS (3 msgs / 5 mins)
+        // 1. VERIFY COOLDOWN STATUS (Strict 3 msgs / 5 mins)
         if (!isSmsAllowed(context)) {
-            Log.w(TAG, "SMS Limit Reached: Blocking transmission for 5-minute cooldown.");
+            Log.w(TAG, "SMS Limit Reached: Alert suppressed to prevent carrier block.");
             return;
         }
 
@@ -44,14 +45,14 @@ public class SmsHelper {
         String savedNumber = db.getTrustedNumber();
 
         if (savedNumber == null || savedNumber.isEmpty()) {
-            Log.e(TAG, "SMS Failure: No trusted number set in settings.");
+            Log.e(TAG, "SMS Failure: No trusted number configured in settings.");
             return;
         }
 
         // 2. INTERNATIONAL FORMATTING (+91 Fix)
         String finalRecipient = formatInternationalNumber(savedNumber);
 
-        // 3. CONSTRUCT ENHANCED ALERT TEXT
+        // 3. CONSTRUCT THE COMPLETE CLOUD-ENABLED ALERT TEXT
         String time = new SimpleDateFormat("dd-MMM HH:mm", Locale.getDefault()).format(new Date());
         
         StringBuilder smsBody = new StringBuilder();
@@ -60,13 +61,22 @@ public class SmsHelper {
         smsBody.append("App: ").append(targetApp).append("\n");
         smsBody.append("Time: ").append(time).append("\n");
 
+        // Map Link Logic
         if (mapLink != null && !mapLink.isEmpty()) {
-            smsBody.append("Map: ").append(mapLink);
+            smsBody.append("Map: ").append(mapLink).append("\n");
         } else {
-            smsBody.append("Location: GPS signal pending");
+            smsBody.append("Map: GPS signal pending\n");
         }
 
-        // 4. EXECUTE SEND
+        // Google Drive Link Logic (Phase 5 Plan)
+        if (driveLink != null && !driveLink.isEmpty()) {
+            smsBody.append("Drive: ").append(driveLink);
+        } else {
+            // As per instruction: Show 'Pending Upload' if offline or uploading
+            smsBody.append("Drive: Pending Upload");
+        }
+
+        // 4. EXECUTE TRANSMISSION
         try {
             SmsManager smsManager;
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
@@ -76,36 +86,35 @@ public class SmsHelper {
             }
 
             if (smsManager != null) {
+                // Divide message into parts to ensure delivery of long URLs
                 java.util.ArrayList<String> parts = smsManager.divideMessage(smsBody.toString());
                 smsManager.sendMultipartTextMessage(finalRecipient, null, parts, null, null);
                 
-                Log.i(TAG, "Detailed alert sent to: " + finalRecipient);
+                Log.i(TAG, "Full Cloud Alert sent to: " + finalRecipient);
                 
                 // 5. UPDATE COOLDOWN COUNTER
                 trackSmsSent(context);
             }
         } catch (Exception e) {
-            Log.e(TAG, "Carrier Block: Failed to deliver external SMS: " + e.getMessage());
+            Log.e(TAG, "Carrier Error: Failed to deliver alert: " + e.getMessage());
         }
     }
 
     /**
-     * Normalizes the phone number to bypass carrier routing blocks.
+     * Normalizes the phone number to ensure international delivery.
      */
     private static String formatInternationalNumber(String number) {
         String clean = number.replaceAll("[^\\d]", "");
-        
-        // If the number doesn't start with '+', we prepend the standard code
         if (!number.startsWith("+")) {
             if (clean.length() == 10) {
-                return "+91" + clean; // Defaulting to India for your specific testing
+                return "+91" + clean;
             }
         }
         return number.startsWith("+") ? number : "+" + number;
     }
 
     /**
-     * Logic: Implements the 3-msg/5-min safety window.
+     * Enforces the 3-msg/5-min safety window.
      */
     private static boolean isSmsAllowed(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREF_SMS_LIMITER, Context.MODE_PRIVATE);
@@ -113,14 +122,11 @@ public class SmsHelper {
         int currentCount = prefs.getInt("msg_count", 0);
         long now = System.currentTimeMillis();
 
-        // Check if 5 minutes have passed since the first message of the current window
         if (now - windowStart > WINDOW_MS) {
-            // Window expired: Reset counter and timestamp
             prefs.edit().putLong("start_time", now).putInt("msg_count", 0).apply();
             return true;
         }
 
-        // Return true only if we haven't hit the 3-message ceiling
         return currentCount < MAX_MSGS;
     }
 
@@ -128,13 +134,5 @@ public class SmsHelper {
         SharedPreferences prefs = context.getSharedPreferences(PREF_SMS_LIMITER, Context.MODE_PRIVATE);
         int count = prefs.getInt("msg_count", 0);
         prefs.edit().putInt("msg_count", count + 1).apply();
-    }
-
-    /**
-     * Internal Placeholder for future MMS Photo Packaging.
-     */
-    public static void sendMmsPhoto(Context context, File image) {
-        if (image == null || !image.exists()) return;
-        Log.d(TAG, "MMS Queue: Intruder photo detected, ready for packaging.");
     }
 }
